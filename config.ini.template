@@ -1,0 +1,21 @@
+[DEEPL]
+# 在官网 https://www.deepl.com/pro-api 注册获取
+api_key = YOUR_DEEPL_API_KEY_HERE
+
+[AUDIO]
+# 静音阈值：值越小，麦克风越灵敏。建议范围 0.001 - 0.02
+silence_threshold = 0.005
+# 音频处理间隔（秒）
+processing_interval_seconds = 2
+
+[WHISPER]
+# Whisper 模型类型: 'tiny', 'base', 'small', 'medium', 'large'
+model_type = small
+
+[GUI]
+# 默认源语言: 'english' 或 'japanese'
+default_language = english
+# 是否默认显示翻译
+show_translation_by_default = True
+# 字幕滚动缓冲区大小（以单词为单位）
+subtitle_word_buffer_size = 40

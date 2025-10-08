@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# macOS specific files
+.DS_Store
+
+# Configuration file with secrets - DO NOT COMMIT
+config.ini

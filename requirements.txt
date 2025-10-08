@@ -1,0 +1,5 @@
+numpy
+requests
+sounddevice==0.4.6
+openai-whisper
+urllib3<2
