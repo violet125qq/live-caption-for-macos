@@ -77,7 +77,7 @@ class CaptionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Live Caption")
-        self.root.geometry("800x200+100+100")
+        self.root.geometry("800x165+100+100") # 调整高度，使布局更紧凑
         self.root.wm_attributes("-topmost", 1)
         self.root.overrideredirect(1)
         self.root.attributes("-alpha", 0.85)
@@ -87,7 +87,6 @@ class CaptionApp:
         self.source_language = tk.StringVar(value=DEFAULT_LANGUAGE)
         self.show_translation = tk.BooleanVar(value=SHOW_TRANSLATION_DEFAULT)
         self.audio_source_mode = tk.StringVar(value="系统音频")
-        self.translation_text = tk.StringVar()
         self.app_running = True
 
         # --- 缓冲区 ---
@@ -131,22 +130,22 @@ class CaptionApp:
         main_frame = ttk.Frame(self.root, style='TFrame')
         main_frame.pack(fill='both', expand=True)
 
-        # --- 字幕显示区域 ---
+        # --- 字幕显示区域 (带边框) ---
         subtitle_frame = ttk.Frame(main_frame, style='TFrame')
-        subtitle_frame.pack(pady=(5,0), padx=10, fill='x')
-        self.subtitle_text_widget = tk.Text(subtitle_frame, height=4, font=("Helvetica", 16, "bold"), fg="white", bg="black", relief="flat", wrap="word", borderwidth=0)
+        subtitle_frame.pack(pady=(10, 5), padx=10, fill='x')
+        self.subtitle_text_widget = tk.Text(subtitle_frame, height=4, font=("Helvetica", 16, "bold"), fg="white", bg="#1C1C1C", relief="sunken", wrap="word", borderwidth=1)
         self.subtitle_text_widget.pack(side='left', fill='x', expand=True)
         scrollbar = ttk.Scrollbar(subtitle_frame, orient='vertical', command=self.subtitle_text_widget.yview, style="Vertical.TScrollbar")
         scrollbar.pack(side='right', fill='y')
         self.subtitle_text_widget['yscrollcommand'] = scrollbar.set
 
-        # --- 翻译显示区域 ---
-        translation_label = ttk.Label(main_frame, textvariable=self.translation_text, font=("Helvetica", 14), foreground="#00FFFF", wraplength=780, justify="left")
-        translation_label.pack(pady=(0,5), padx=10, fill='x', anchor='w')
+        # --- 翻译显示区域 (无边框) ---
+        self.translation_text_widget = tk.Text(main_frame, height=2, font=("Helvetica", 14), fg="#00FFFF", bg="black", relief="flat", wrap="word", borderwidth=0, highlightthickness=0)
+        self.translation_text_widget.pack(pady=(0, 5), padx=10, fill='x', anchor='w')
 
         # --- 控制区域 ---
         control_frame = ttk.Frame(main_frame, style='TFrame')
-        control_frame.pack(fill='x', padx=10, side='bottom', pady=5)
+        control_frame.pack(fill='x', padx=10, side='bottom', pady=(0, 5))
 
         source_label = ttk.Label(control_frame, text="音频源:", style='TLabel')
         source_label.pack(side='left', padx=(0,5))
@@ -208,10 +207,15 @@ class CaptionApp:
                     self.subtitle_text_widget.see('end')
             elif result['type'] == 'translation':
                 if self.show_translation.get():
-                    self.translation_text.set(result['text'])
+                    self.translation_text_widget.config(state='normal')
+                    self.translation_text_widget.delete('1.0', 'end')
+                    self.translation_text_widget.insert('end', result['text'])
+                    self.translation_text_widget.config(state='disabled')
         
         if not self.show_translation.get():
-            self.translation_text.set("")
+            self.translation_text_widget.config(state='normal')
+            self.translation_text_widget.delete('1.0', 'end')
+            self.translation_text_widget.config(state='disabled')
 
         if self.app_running:
             self.root.after(100, self.periodic_gui_update)

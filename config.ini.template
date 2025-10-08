@@ -3,6 +3,10 @@
 api_key = YOUR_DEEPL_API_KEY_HERE
 
 [AUDIO]
+# 在下方填入您的麦克风和虚拟音频设备的ID。ID可以通过运行脚本时打印的列表找到。
+mic_device_id = 
+system_audio_device_id = 
+
 # 静音阈值：值越小，麦克风越灵敏。建议范围 0.001 - 0.02
 silence_threshold = 0.005
 # 音频处理间隔（秒）
