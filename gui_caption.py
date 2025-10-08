@@ -15,6 +15,20 @@ import requests
 import sounddevice as sd
 import whisper
 
+# --- 辅助函数：列出音频设备 ---
+def list_audio_devices():
+    """在控制台打印所有可用的音频设备及其ID。"""
+    print("\n" + "-"*30)
+    print("可用的音频设备列表:")
+    try:
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                print(f"  ID {i}: {device['name']}")
+    except Exception as e:
+        print(f"无法查询音频设备: {e}")
+    print("-"*30 + "\n")
+
 # --- 配置加载 ---
 config = configparser.ConfigParser()
 
@@ -26,13 +40,17 @@ config.read('config.ini')
 
 try:
     DEEPL_API_KEY = config.get('DEEPL', 'api_key')
+    mic_device_id_str = config.get('AUDIO', 'mic_device_id', fallback='').strip()
+    MIC_DEVICE_ID = int(mic_device_id_str) if mic_device_id_str else None
+    system_audio_device_id_str = config.get('AUDIO', 'system_audio_device_id', fallback='').strip()
+    SYSTEM_AUDIO_DEVICE_ID = int(system_audio_device_id_str) if system_audio_device_id_str else None
     SILENCE_THRESHOLD = config.getfloat('AUDIO', 'silence_threshold')
     PROCESSING_INTERVAL_SECONDS = config.getint('AUDIO', 'processing_interval_seconds')
     MODEL_TYPE = config.get('WHISPER', 'model_type')
     DEFAULT_LANGUAGE = config.get('GUI', 'default_language')
     SHOW_TRANSLATION_DEFAULT = config.getboolean('GUI', 'show_translation_by_default')
     SUBTITLE_WORD_BUFFER_SIZE = config.getint('GUI', 'subtitle_word_buffer_size', fallback=40)
-except (configparser.NoSectionError, configparser.NoOptionError) as e:
+except Exception as e:
     print(f"错误: 配置文件 'config.ini' 格式不正确或缺少键。 {e}")
     sys.exit(1)
 
@@ -59,7 +77,7 @@ class CaptionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Live Caption")
-        self.root.geometry("800x200+100+100") # 增加高度以容纳滚动条和4行文本
+        self.root.geometry("800x165+100+100") # 调整高度，使布局更紧凑
         self.root.wm_attributes("-topmost", 1)
         self.root.overrideredirect(1)
         self.root.attributes("-alpha", 0.85)
@@ -68,7 +86,7 @@ class CaptionApp:
         # --- 状态和配置变量 ---
         self.source_language = tk.StringVar(value=DEFAULT_LANGUAGE)
         self.show_translation = tk.BooleanVar(value=SHOW_TRANSLATION_DEFAULT)
-        self.translation_text = tk.StringVar()
+        self.audio_source_mode = tk.StringVar(value="系统音频")
         self.app_running = True
 
         # --- 缓冲区 ---
@@ -112,33 +130,38 @@ class CaptionApp:
         main_frame = ttk.Frame(self.root, style='TFrame')
         main_frame.pack(fill='both', expand=True)
 
-        # --- 字幕显示区域 (Text + Scrollbar) ---
+        # --- 字幕显示区域 (带边框) ---
         subtitle_frame = ttk.Frame(main_frame, style='TFrame')
-        subtitle_frame.pack(pady=(10, 0), padx=10, fill='x')
-
-        self.subtitle_text_widget = tk.Text(subtitle_frame, height=4, font=("Helvetica", 18, "bold"), fg="white", bg="black", relief="flat", wrap="word", borderwidth=0)
+        subtitle_frame.pack(pady=(10, 5), padx=10, fill='x')
+        self.subtitle_text_widget = tk.Text(subtitle_frame, height=4, font=("Helvetica", 16, "bold"), fg="white", bg="#1C1C1C", relief="sunken", wrap="word", borderwidth=1)
         self.subtitle_text_widget.pack(side='left', fill='x', expand=True)
-
         scrollbar = ttk.Scrollbar(subtitle_frame, orient='vertical', command=self.subtitle_text_widget.yview, style="Vertical.TScrollbar")
         scrollbar.pack(side='right', fill='y')
         self.subtitle_text_widget['yscrollcommand'] = scrollbar.set
-        
-        # --- 翻译显示区域 ---
-        translation_label = ttk.Label(main_frame, textvariable=self.translation_text, font=("Helvetica", 14), foreground="#00FFFF", wraplength=780, justify="left")
-        translation_label.pack(pady=5, padx=10, fill='x', anchor='w')
+
+        # --- 翻译显示区域 (无边框) ---
+        self.translation_text_widget = tk.Text(main_frame, height=2, font=("Helvetica", 14), fg="#00FFFF", bg="black", relief="flat", wrap="word", borderwidth=0, highlightthickness=0)
+        self.translation_text_widget.pack(pady=(0, 5), padx=10, fill='x', anchor='w')
 
         # --- 控制区域 ---
         control_frame = ttk.Frame(main_frame, style='TFrame')
-        control_frame.pack(fill='x', padx=10, side='bottom', pady=5)
+        control_frame.pack(fill='x', padx=10, side='bottom', pady=(0, 5))
+
+        source_label = ttk.Label(control_frame, text="音频源:", style='TLabel')
+        source_label.pack(side='left', padx=(0,5))
+        mic_radio = ttk.Radiobutton(control_frame, text="麦克风", variable=self.audio_source_mode, value="麦克风", style='TRadiobutton')
+        mic_radio.pack(side='left')
+        sys_radio = ttk.Radiobutton(control_frame, text="系统音频", variable=self.audio_source_mode, value="系统音频", style='TRadiobutton')
+        sys_radio.pack(side='left')
+        mix_radio = ttk.Radiobutton(control_frame, text="混合模式", variable=self.audio_source_mode, value="混合模式", style='TRadiobutton')
+        mix_radio.pack(side='left', padx=(0, 15))
 
         lang_label = ttk.Label(control_frame, text="源语言:", style='TLabel')
         lang_label.pack(side='left', padx=(0, 5))
-        
         eng_radio = ttk.Radiobutton(control_frame, text="英语", variable=self.source_language, value='english', style='TRadiobutton')
         eng_radio.pack(side='left')
-        
         jp_radio = ttk.Radiobutton(control_frame, text="日语", variable=self.source_language, value='japanese', style='TRadiobutton')
-        jp_radio.pack(side='left', padx=(0, 20))
+        jp_radio.pack(side='left', padx=(0, 15))
 
         trans_check = ttk.Checkbutton(control_frame, text="显示翻译", variable=self.show_translation, style='TCheckbutton')
         trans_check.pack(side='left')
@@ -177,20 +200,22 @@ class CaptionApp:
                 if new_words:
                     self.word_buffer.extend(new_words)
                     display_text = " ".join(self.word_buffer)
-                    
-                    # 更新Text小部件内容
                     self.subtitle_text_widget.config(state='normal')
                     self.subtitle_text_widget.delete('1.0', 'end')
                     self.subtitle_text_widget.insert('end', display_text)
                     self.subtitle_text_widget.config(state='disabled')
-                    self.subtitle_text_widget.see('end') # 自动滚动到底部
-
+                    self.subtitle_text_widget.see('end')
             elif result['type'] == 'translation':
                 if self.show_translation.get():
-                    self.translation_text.set(result['text'])
+                    self.translation_text_widget.config(state='normal')
+                    self.translation_text_widget.delete('1.0', 'end')
+                    self.translation_text_widget.insert('end', result['text'])
+                    self.translation_text_widget.config(state='disabled')
         
         if not self.show_translation.get():
-            self.translation_text.set("")
+            self.translation_text_widget.config(state='normal')
+            self.translation_text_widget.delete('1.0', 'end')
+            self.translation_text_widget.config(state='disabled')
 
         if self.app_running:
             self.root.after(100, self.periodic_gui_update)
@@ -198,40 +223,75 @@ class CaptionApp:
     def audio_processing_loop(self):
         try:
             model = whisper.load_model(MODEL_TYPE)
-            self.results_queue.put({'type': 'subtitle', 'text': '模型加载完毕，请开始讲话...'}) 
+            self.results_queue.put({'type': 'subtitle', 'text': '模型加载完毕，请选择音频源...'}) 
         except Exception as e:
             self.results_queue.put({'type': 'subtitle', 'text': f"模型加载失败: {e}"})
             return
 
+        mic_audio_queue = queue.Queue()
+        system_audio_queue = queue.Queue()
+        last_mode = ""
+        streams = []
+        audio_buffer = np.array([], dtype=np.float32)
         samplerate = 16000
         interval_samples = int(PROCESSING_INTERVAL_SECONDS * samplerate)
-        audio_buffer = np.array([], dtype=np.float32)
-
-        try:
-            device_id = sd.default.device[0]
-        except Exception as e:
-            self.results_queue.put({'type': 'subtitle', 'text': f"错误: 找不到默认麦克风! {e}"})
-            return
-
-        audio_queue = queue.Queue()
-
-        def audio_callback(indata, frames, time, status):
-            if status:
-                print(status, file=sys.stderr)
-            if self.app_running:
-                audio_queue.put(indata.copy())
-
-        stream = sd.InputStream(device=device_id, channels=1, samplerate=samplerate, callback=audio_callback, dtype='float32')
-        stream.start()
 
         while self.app_running:
             try:
-                audio_chunk = [audio_queue.get(timeout=0.5)]
-                while not audio_queue.empty():
-                    audio_chunk.append(audio_queue.get_nowait())
-                
-                audio_buffer = np.append(audio_buffer, np.concatenate(audio_chunk).flatten())
+                current_mode = self.audio_source_mode.get()
+                if current_mode != last_mode:
+                    for stream in streams:
+                        stream.stop()
+                        stream.close()
+                    streams = []
+                    audio_buffer = np.array([], dtype=np.float32)
+                    last_mode = current_mode
+                    self.results_queue.put({'type': 'subtitle', 'text': f'切换到 {current_mode} 模式...'}) 
+                    self.word_buffer.clear()
+                    self.translation_input_buffer.clear()
+                    
+                    def mic_callback(indata, frames, time, status): mic_audio_queue.put(indata.copy())
+                    def system_callback(indata, frames, time, status): system_audio_queue.put(indata.copy())
 
+                    if current_mode in ["麦克风", "混合模式"] and MIC_DEVICE_ID is not None:
+                        streams.append(sd.InputStream(device=MIC_DEVICE_ID, channels=1, samplerate=samplerate, callback=mic_callback, dtype='float32'))
+                    if current_mode in ["系统音频", "混合模式"] and SYSTEM_AUDIO_DEVICE_ID is not None:
+                        streams.append(sd.InputStream(device=SYSTEM_AUDIO_DEVICE_ID, channels=1, samplerate=samplerate, callback=system_callback, dtype='float32'))
+
+                    if not streams:
+                        self.results_queue.put({'type': 'subtitle', 'text': f"'{current_mode}' 模式无法启动，请在 config.ini 中配置设备ID。"}) 
+                        last_mode = "" # 允许重试
+                        time.sleep(2)
+                        continue
+
+                    for stream in streams:
+                        stream.start()
+
+                # --- 音频数据收集与缓冲 ---
+                mic_chunks = []
+                while not mic_audio_queue.empty(): mic_chunks.append(mic_audio_queue.get())
+                
+                system_chunks = []
+                while not system_audio_queue.empty(): system_chunks.append(system_audio_queue.get())
+
+                if mic_chunks or system_chunks:
+                    mixed_audio_chunk = np.array([], dtype=np.float32)
+                    if mic_chunks:
+                        mixed_audio_chunk = np.concatenate(mic_chunks).flatten()
+                    if system_chunks:
+                        system_audio_chunk = np.concatenate(system_chunks).flatten()
+                        if len(mixed_audio_chunk) == 0:
+                            mixed_audio_chunk = system_audio_chunk
+                        else:
+                            if len(mixed_audio_chunk) < len(system_audio_chunk):
+                                mixed_audio_chunk = np.pad(mixed_audio_chunk, (0, len(system_audio_chunk) - len(mixed_audio_chunk)))
+                            if len(system_audio_chunk) < len(mixed_audio_chunk):
+                                system_audio_chunk = np.pad(system_audio_chunk, (0, len(mixed_audio_chunk) - len(system_audio_chunk)))
+                            mixed_audio_chunk += system_audio_chunk
+                    
+                    audio_buffer = np.append(audio_buffer, mixed_audio_chunk)
+
+                # --- 按时间间隔处理音频 ---
                 if len(audio_buffer) >= interval_samples:
                     processing_audio = audio_buffer[:interval_samples]
                     audio_buffer = audio_buffer[interval_samples:]
@@ -240,38 +300,39 @@ class CaptionApp:
                     if rms_val < SILENCE_THRESHOLD:
                         continue
 
-                    result = model.transcribe(
-                        processing_audio,
-                        language=self.source_language.get(),
-                        fp16=False
-                    )
+                    result = model.transcribe(processing_audio, language=self.source_language.get(), fp16=False)
                     recognized_text = result['text'].strip()
 
                     if recognized_text:
                         self.results_queue.put({'type': 'subtitle', 'text': recognized_text})
-
                         if self.show_translation.get():
                             self.translation_input_buffer.append(recognized_text)
                             text_to_translate = " ".join(self.translation_input_buffer)
-                            
                             def translate_task(text):
                                 translated = translate_text(text)
                                 if self.app_running:
                                     self.results_queue.put({'type': 'translation', 'text': translated})
-                            
                             threading.Thread(target=translate_task, args=(text_to_translate,), daemon=True).start()
+                else:
+                    time.sleep(0.1) # 如果没有足够数据，短暂休眠
 
-            except queue.Empty:
-                continue
             except Exception as e:
-                print(f"处理循环中发生错误: {e}", file=sys.stderr)
-                time.sleep(1)
+                print(f"音频处理循环错误: {e}", file=sys.stderr)
+                self.results_queue.put({'type': 'subtitle', 'text': f'发生错误: {e}'})
+                time.sleep(2)
 
-        stream.stop()
-        stream.close()
+        for stream in streams:
+            stream.stop()
+            stream.close()
 
 # --- 程序入口 ---
 if __name__ == "__main__":
+    if MIC_DEVICE_ID is None or SYSTEM_AUDIO_DEVICE_ID is None:
+        list_audio_devices()
+        print("提示: 请将找到的设备ID填入 config.ini 文件中。")
+        if input("是否继续启动GUI？(y/n): ").lower() != 'y':
+            sys.exit(0)
+
     try:
         root = tk.Tk()
         app = CaptionApp(root)
